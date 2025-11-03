@@ -1,10 +1,10 @@
 FROM node:18-alpine
 
 # Install Python and dependencies for yt-dlp
-RUN apk add --no-cache python3 py3-pip ffmpeg
+RUN apk add --no-cache python3 py3-pip ffmpeg wget
 
-# Install yt-dlp
-RUN pip3 install --no-cache-dir yt-dlp
+# Install yt-dlp using pip with break-system-packages flag (required for Alpine)
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Create app directory
 WORKDIR /app
