@@ -25,6 +25,6 @@ services:
   frontend:
     build:
       args:
-        REACT_APP_API_URL: http://localhost:3050  # Updated to match new backend port
+        REACT_APP_API_URL: ${UNRAID_IP:-http://192.168.4.22}:3050
     ports:
       - "8080:80"  # Web interface on port 8080
