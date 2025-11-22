@@ -162,14 +162,14 @@ function ChannelManagement() {
             </div>
 
             <div className="form-group">
-              <label>YouTube API Key</label>
+              <label>YouTube API Key (Optional)</label>
               <input
                 type="password"
                 value={newChannel.apiKey}
                 onChange={(e) => setNewChannel({ ...newChannel, apiKey: e.target.value })}
-                placeholder="Your YouTube Data API v3 key"
-                required
+                placeholder="Leave blank to use default API key from .env"
               />
+              <small>If left blank, will use YOUTUBE_API_KEY from environment variables</small>
             </div>
 
             <div className="form-group">

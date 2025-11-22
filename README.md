@@ -53,14 +53,20 @@ Required configuration:
 # Database password (choose a strong password)
 DB_PASSWORD=your_secure_password
 
+# YouTube API Key - RECOMMENDED to set this as default
+# This will be used for all channels unless you specify a different key per channel
+YOUTUBE_API_KEY=your_youtube_api_key
+
 # Optional: Import existing channel during migration (backward compatibility)
 # If specified, this channel will be automatically added to the database
-YOUTUBE_API_KEY=your_youtube_api_key
 YOUTUBE_CHANNEL_ID=your_channel_id
 SYNC_CRON=0 2 * * *
 ```
 
-**Note**: The `YOUTUBE_API_KEY` and `YOUTUBE_CHANNEL_ID` environment variables are now optional. You can add and manage channels through the web interface instead! These variables are only used for backward compatibility - if specified, the channel will be automatically imported during database migration.
+**Note**:
+- **`YOUTUBE_API_KEY`**: Recommended to set this as your default API key. When adding channels via the UI, you can leave the API key field blank and it will use this default value.
+- **`YOUTUBE_CHANNEL_ID`**: Optional, for backward compatibility. If specified, this channel will be automatically imported during database migration.
+- You can still specify different API keys per channel through the web interface if you want separate quotas.
 
 ### 3. Deploy with Docker Compose
 

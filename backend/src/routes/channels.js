@@ -57,12 +57,21 @@ router.post('/', async (req, res) => {
   try {
     const { channelId, apiKey, syncSchedule = '0 2 * * *' } = req.body;
 
-    if (!channelId || !apiKey) {
-      return res.status(400).json({ error: 'channelId and apiKey are required' });
+    if (!channelId) {
+      return res.status(400).json({ error: 'channelId is required' });
+    }
+
+    // Use provided API key or fall back to default from environment
+    const effectiveApiKey = apiKey || process.env.YOUTUBE_API_KEY;
+
+    if (!effectiveApiKey) {
+      return res.status(400).json({
+        error: 'API key is required. Either provide apiKey in request or set YOUTUBE_API_KEY in environment variables.'
+      });
     }
 
     // Validate the channel ID and API key by fetching channel details
-    const youtubeAPI = new YouTubeAPIService(apiKey);
+    const youtubeAPI = new YouTubeAPIService(effectiveApiKey);
     let channelDetails;
 
     try {
@@ -95,7 +104,7 @@ router.post('/', async (req, res) => {
         channelDetails.id, channelDetails.title, channelDetails.description,
         channelDetails.customUrl, channelDetails.subscriberCount,
         channelDetails.videoCount, channelDetails.viewCount,
-        channelDetails.thumbnailUrl, apiKey, true, syncSchedule
+        channelDetails.thumbnailUrl, effectiveApiKey, true, syncSchedule
       ]
     );
 
