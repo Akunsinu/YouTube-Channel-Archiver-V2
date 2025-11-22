@@ -72,6 +72,15 @@
   background-color: #c62828;
 }
 
+.btn-warning {
+  background-color: #f57c00;
+  color: white;
+}
+
+.btn-warning:hover {
+  background-color: #ef6c00;
+}
+
 .btn-sm {
   padding: 8px 15px;
   font-size: 12px;
@@ -124,7 +133,8 @@
   color: #333;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid #ccc;
@@ -133,10 +143,20 @@
   box-sizing: border-box;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group select:focus {
   outline: none;
   border-color: #1976d2;
   box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+}
+
+.form-select {
+  background-color: white;
+  cursor: pointer;
+}
+
+.custom-cron-input {
+  margin-top: 10px;
 }
 
 .form-group small {
@@ -334,6 +354,37 @@
 .channel-actions .btn {
   flex: 1;
   min-width: 100px;
+}
+
+.running-sync-status {
+  background-color: #e3f2fd;
+  border: 2px solid #2196f3;
+  border-radius: 5px;
+  padding: 12px;
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-indicator {
+  font-size: 20px;
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sync-text {
+  font-weight: 500;
+  color: #1976d2;
+  font-size: 14px;
 }
 
 @media (max-width: 768px) {

@@ -79,4 +79,48 @@ router.get('/progress', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/sync/cancel - Cancel a running sync
+ */
+router.post('/cancel', async (req, res) => {
+  try {
+    const { channelId } = req.body;
+
+    // Get sync service from app context
+    const syncService = req.app.get('syncService');
+
+    if (!syncService) {
+      return res.status(500).json({ error: 'Sync service not initialized' });
+    }
+
+    // Set cancellation flag
+    syncService.cancelSync(channelId);
+
+    // Update any running sync logs to cancelled
+    if (channelId) {
+      await db.query(
+        `UPDATE sync_log
+         SET status = 'cancelled',
+             completed_at = CURRENT_TIMESTAMP,
+             errors = 'Cancelled by user'
+         WHERE channel_id = $1 AND status = 'running'`,
+        [channelId]
+      );
+    } else {
+      await db.query(
+        `UPDATE sync_log
+         SET status = 'cancelled',
+             completed_at = CURRENT_TIMESTAMP,
+             errors = 'Cancelled by user'
+         WHERE status = 'running'`
+      );
+    }
+
+    res.json({ message: 'Sync cancellation requested' });
+  } catch (error) {
+    console.error('Error cancelling sync:', error);
+    res.status(500).json({ error: 'Failed to cancel sync' });
+  }
+});
+
 module.exports = router;

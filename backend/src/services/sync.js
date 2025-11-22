@@ -5,6 +5,7 @@ const db = require('../db');
 class SyncService {
   constructor() {
     this.downloader = new VideoDownloader(process.env.VIDEO_STORAGE_PATH || '/data/videos');
+    this.cancellationFlags = new Map(); // Track cancellation requests
   }
 
   /**
@@ -15,14 +16,51 @@ class SyncService {
   }
 
   /**
+   * Request cancellation of a sync
+   */
+  cancelSync(channelId) {
+    if (channelId) {
+      this.cancellationFlags.set(channelId, true);
+      console.log(`Cancellation requested for channel ${channelId}`);
+    } else {
+      // Cancel all syncs
+      console.log('Cancellation requested for all syncs');
+      this.cancellationFlags.set('__all__', true);
+    }
+  }
+
+  /**
+   * Check if sync is cancelled
+   */
+  isCancelled(channelId) {
+    return this.cancellationFlags.get(channelId) === true || this.cancellationFlags.get('__all__') === true;
+  }
+
+  /**
+   * Clear cancellation flag
+   */
+  clearCancellation(channelId) {
+    this.cancellationFlags.delete(channelId);
+    this.cancellationFlags.delete('__all__');
+  }
+
+  /**
    * Full sync: Download all channel data
    */
   async fullSync(channelId, apiKey) {
     const syncLogId = await this.createSyncLog(channelId, 'full_sync', 'running');
     const youtubeAPI = this.getYouTubeAPI(apiKey);
 
+    // Clear any previous cancellation flags
+    this.clearCancellation(channelId);
+
     try {
       console.log(`Starting full channel sync for ${channelId}...`);
+
+      // Check for cancellation before starting
+      if (this.isCancelled(channelId)) {
+        throw new Error('Sync cancelled by user');
+      }
 
       // 1. Get and save channel details
       const channelDetails = await youtubeAPI.getChannelDetails(channelId);
@@ -36,6 +74,12 @@ class SyncService {
 
       // 3. Process each video
       for (const video of videos) {
+        // Check for cancellation
+        if (this.isCancelled(channelId)) {
+          console.log(`Sync cancelled for ${channelId} after ${processedCount} videos`);
+          throw new Error('Sync cancelled by user');
+        }
+
         await this.processVideo(video, channelId, youtubeAPI);
         processedCount++;
 
@@ -204,8 +248,16 @@ class SyncService {
     const syncLogId = await this.createSyncLog(channelId, 'incremental_sync', 'running');
     const youtubeAPI = this.getYouTubeAPI(apiKey);
 
+    // Clear any previous cancellation flags
+    this.clearCancellation(channelId);
+
     try {
       console.log(`Starting incremental sync for ${channelId}...`);
+
+      // Check for cancellation before starting
+      if (this.isCancelled(channelId)) {
+        throw new Error('Sync cancelled by user');
+      }
 
       const channelDetails = await youtubeAPI.getChannelDetails(channelId);
       const videos = await youtubeAPI.getAllChannelVideos(channelDetails.uploadsPlaylistId);
@@ -213,6 +265,12 @@ class SyncService {
       let newVideosCount = 0;
 
       for (const video of videos) {
+        // Check for cancellation
+        if (this.isCancelled(channelId)) {
+          console.log(`Sync cancelled for ${channelId} after ${newVideosCount} new videos`);
+          throw new Error('Sync cancelled by user');
+        }
+
         const existing = await db.query('SELECT id FROM videos WHERE id = $1', [video.id]);
 
         if (existing.rows.length === 0) {

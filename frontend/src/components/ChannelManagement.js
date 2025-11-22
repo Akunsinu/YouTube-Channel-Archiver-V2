@@ -11,12 +11,27 @@ function ChannelManagement() {
   const [newChannel, setNewChannel] = useState({
     channelId: '',
     apiKey: '',
-    syncSchedule: '0 2 * * *'
+    syncSchedule: '0 2 * * *',
+    scheduleType: 'daily-2am'
   });
   const [addingChannel, setAddingChannel] = useState(false);
+  const [runningSyncs, setRunningSyncs] = useState({});
+
+  const scheduleOptions = [
+    { value: 'daily-2am', label: 'Daily at 2:00 AM', cron: '0 2 * * *' },
+    { value: 'daily-midnight', label: 'Daily at Midnight', cron: '0 0 * * *' },
+    { value: 'every-6h', label: 'Every 6 Hours', cron: '0 */6 * * *' },
+    { value: 'every-12h', label: 'Every 12 Hours', cron: '0 */12 * * *' },
+    { value: 'weekly-sunday', label: 'Weekly (Sunday 2:00 AM)', cron: '0 2 * * 0' },
+    { value: 'twice-daily', label: 'Twice Daily (2 AM & 2 PM)', cron: '0 2,14 * * *' },
+    { value: 'custom', label: 'Custom (Enter Cron)', cron: '' }
+  ];
 
   useEffect(() => {
     fetchChannels();
+    // Check for running syncs every 5 seconds
+    const interval = setInterval(checkRunningSyncs, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchChannels = async () => {
@@ -32,6 +47,66 @@ function ChannelManagement() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const checkRunningSyncs = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sync/progress`);
+      if (!response.ok) return;
+      const data = await response.json();
+
+      if (data.running && data.sync) {
+        setRunningSyncs(prev => ({
+          ...prev,
+          [data.sync.channel_id]: {
+            syncType: data.sync.sync_type,
+            startedAt: data.sync.started_at,
+            videosProcessed: data.sync.videos_processed
+          }
+        }));
+      } else {
+        setRunningSyncs({});
+      }
+    } catch (err) {
+      // Silently fail - don't show errors for background checks
+    }
+  };
+
+  const handleCancelSync = async (channelId) => {
+    if (!window.confirm('Are you sure you want to cancel the running sync?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/sync/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ channelId })
+      });
+
+      if (!response.ok) throw new Error('Failed to cancel sync');
+
+      setRunningSyncs(prev => {
+        const updated = { ...prev };
+        delete updated[channelId];
+        return updated;
+      });
+
+      alert('Sync cancellation requested');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleScheduleTypeChange = (type) => {
+    const option = scheduleOptions.find(opt => opt.value === type);
+    setNewChannel({
+      ...newChannel,
+      scheduleType: type,
+      syncSchedule: option.cron || newChannel.syncSchedule
+    });
   };
 
   const handleAddChannel = async (e) => {
@@ -173,14 +248,30 @@ function ChannelManagement() {
             </div>
 
             <div className="form-group">
-              <label>Sync Schedule (Cron)</label>
-              <input
-                type="text"
-                value={newChannel.syncSchedule}
-                onChange={(e) => setNewChannel({ ...newChannel, syncSchedule: e.target.value })}
-                placeholder="0 2 * * *"
-              />
-              <small>Default: 0 2 * * * (Every day at 2:00 AM)</small>
+              <label>Sync Schedule</label>
+              <select
+                value={newChannel.scheduleType}
+                onChange={(e) => handleScheduleTypeChange(e.target.value)}
+                className="form-select"
+              >
+                {scheduleOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              {newChannel.scheduleType === 'custom' && (
+                <>
+                  <input
+                    type="text"
+                    value={newChannel.syncSchedule}
+                    onChange={(e) => setNewChannel({ ...newChannel, syncSchedule: e.target.value })}
+                    placeholder="0 2 * * *"
+                    className="custom-cron-input"
+                  />
+                  <small>Enter cron expression (e.g., 0 2 * * * for 2:00 AM daily)</small>
+                </>
+              )}
             </div>
 
             <div className="form-actions">
@@ -264,22 +355,46 @@ function ChannelManagement() {
                 </div>
               </div>
 
+              {runningSyncs[channel.id] && (
+                <div className="running-sync-status">
+                  <span className="sync-indicator">🔄</span>
+                  <span className="sync-text">
+                    {runningSyncs[channel.id].syncType === 'full_sync' ? 'Full Sync' : 'Incremental Sync'} in progress...
+                    {runningSyncs[channel.id].videosProcessed > 0 &&
+                      ` (${runningSyncs[channel.id].videosProcessed} videos processed)`
+                    }
+                  </span>
+                </div>
+              )}
+
               <div className="channel-actions">
-                <button
-                  className="btn btn-sm btn-success"
-                  onClick={() => handleTriggerSync(channel.id, 'incremental')}
-                >
-                  Incremental Sync
-                </button>
-                <button
-                  className="btn btn-sm btn-info"
-                  onClick={() => handleTriggerSync(channel.id, 'full')}
-                >
-                  Full Sync
-                </button>
+                {runningSyncs[channel.id] ? (
+                  <button
+                    className="btn btn-sm btn-warning"
+                    onClick={() => handleCancelSync(channel.id)}
+                  >
+                    Cancel Sync
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="btn btn-sm btn-success"
+                      onClick={() => handleTriggerSync(channel.id, 'incremental')}
+                    >
+                      Incremental Sync
+                    </button>
+                    <button
+                      className="btn btn-sm btn-info"
+                      onClick={() => handleTriggerSync(channel.id, 'full')}
+                    >
+                      Full Sync
+                    </button>
+                  </>
+                )}
                 <button
                   className="btn btn-sm btn-danger"
                   onClick={() => handleDeleteChannel(channel.id)}
+                  disabled={!!runningSyncs[channel.id]}
                 >
                   Delete
                 </button>

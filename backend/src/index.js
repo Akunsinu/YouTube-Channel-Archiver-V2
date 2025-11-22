@@ -28,6 +28,9 @@ app.get('/health', (req, res) => {
 const scheduler = new Scheduler();
 app.set('scheduler', scheduler);
 
+// Make sync service available for cancellation
+app.set('syncService', scheduler.syncService);
+
 // Start daily sync scheduler
 const CRON_SCHEDULE = process.env.SYNC_CRON || '0 2 * * *'; // Default: 2 AM daily
 scheduler.startDailySync(CRON_SCHEDULE);
