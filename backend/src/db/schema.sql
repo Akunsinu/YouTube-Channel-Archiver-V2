@@ -1,6 +1,6 @@
 -- YouTube Archiver Database Schema
 
--- Channel information
+-- Channel information (supports multiple channels)
 CREATE TABLE IF NOT EXISTS channel (
     id VARCHAR(255) PRIMARY KEY,
     title VARCHAR(500) NOT NULL,
@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS channel (
     video_count INTEGER,
     view_count BIGINT,
     thumbnail_url TEXT,
+    api_key VARCHAR(500), -- YouTube API key for this channel
+    sync_enabled BOOLEAN DEFAULT true, -- Whether to sync this channel
+    sync_schedule VARCHAR(50) DEFAULT '0 2 * * *', -- Cron schedule for syncing
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -55,7 +58,8 @@ CREATE TABLE IF NOT EXISTS comments (
 -- Sync log to track download history
 CREATE TABLE IF NOT EXISTS sync_log (
     id SERIAL PRIMARY KEY,
-    sync_type VARCHAR(50) NOT NULL, -- full_sync, comments_refresh, video_download
+    channel_id VARCHAR(255) REFERENCES channel(id) ON DELETE CASCADE,
+    sync_type VARCHAR(50) NOT NULL, -- full_sync, incremental_sync, comments_refresh
     status VARCHAR(50) NOT NULL, -- running, completed, failed
     videos_processed INTEGER DEFAULT 0,
     comments_processed INTEGER DEFAULT 0,
@@ -71,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_download_status ON videos(download_status)
 CREATE INDEX IF NOT EXISTS idx_comments_video_id ON comments(video_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_comment_id);
 CREATE INDEX IF NOT EXISTS idx_comments_published_at ON comments(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sync_log_channel_id ON sync_log(channel_id);
 CREATE INDEX IF NOT EXISTS idx_sync_log_started_at ON sync_log(started_at DESC);
 
 -- Create a function to update the updated_at timestamp

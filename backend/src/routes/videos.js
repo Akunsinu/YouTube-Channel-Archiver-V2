@@ -16,7 +16,8 @@ router.get('/', async (req, res) => {
       search = '',
       searchIn = 'all',
       sortBy = 'upload_date',
-      order = 'DESC'
+      order = 'DESC',
+      channelId = ''
     } = req.query;
 
     const offset = (page - 1) * limit;
@@ -33,7 +34,7 @@ router.get('/', async (req, res) => {
         SELECT DISTINCT
           v.id, v.title, v.description, v.upload_date, v.duration, v.view_count,
           v.like_count, v.comment_count, v.thumbnail_url, v.tags, v.download_status,
-          v.file_path, v.downloaded_at
+          v.file_path, v.downloaded_at, v.channel_id
         FROM videos v
         INNER JOIN comments c ON v.id = c.video_id
         WHERE c.text_display ILIKE $1
@@ -47,46 +48,76 @@ router.get('/', async (req, res) => {
         WHERE c.text_display ILIKE $1
       `;
       countParams.push(`%${search}%`);
+
+      // Add channel filter if provided
+      if (channelId) {
+        query += ` AND v.channel_id = $${queryParams.length + 1}`;
+        countQuery += ` AND v.channel_id = $${countParams.length + 1}`;
+        queryParams.push(channelId);
+        countParams.push(channelId);
+      }
     } else {
       // Search in videos (title, description, or both)
       query = `
         SELECT
           id, title, description, upload_date, duration, view_count,
           like_count, comment_count, thumbnail_url, tags, download_status,
-          file_path, downloaded_at
+          file_path, downloaded_at, channel_id
         FROM videos
         WHERE 1=1
       `;
 
       countQuery = 'SELECT COUNT(*) FROM videos WHERE 1=1';
 
+      // Add channel filter if provided
+      if (channelId) {
+        query += ` AND channel_id = $${queryParams.length + 1}`;
+        countQuery += ` AND channel_id = $${countParams.length + 1}`;
+        queryParams.push(channelId);
+        countParams.push(channelId);
+      }
+
       if (search) {
         if (searchIn === 'title') {
           query += ` AND title ILIKE $${queryParams.length + 1}`;
-          countQuery += ` AND title ILIKE $1`;
+          countQuery += ` AND title ILIKE $${countParams.length + 1}`;
         } else if (searchIn === 'description') {
           query += ` AND description ILIKE $${queryParams.length + 1}`;
-          countQuery += ` AND description ILIKE $1`;
+          countQuery += ` AND description ILIKE $${countParams.length + 1}`;
         } else {
           // searchIn === 'all' - search in title, description, and comments
           query = `
             SELECT DISTINCT
               v.id, v.title, v.description, v.upload_date, v.duration, v.view_count,
               v.like_count, v.comment_count, v.thumbnail_url, v.tags, v.download_status,
-              v.file_path, v.downloaded_at
+              v.file_path, v.downloaded_at, v.channel_id
             FROM videos v
             LEFT JOIN comments c ON v.id = c.video_id
-            WHERE (v.title ILIKE $1 OR v.description ILIKE $1 OR c.text_display ILIKE $1)
+            WHERE (v.title ILIKE $${queryParams.length + 1} OR v.description ILIKE $${queryParams.length + 1} OR c.text_display ILIKE $${queryParams.length + 1})
           `;
           countQuery = `
             SELECT COUNT(DISTINCT v.id)
             FROM videos v
             LEFT JOIN comments c ON v.id = c.video_id
-            WHERE (v.title ILIKE $1 OR v.description ILIKE $1 OR c.text_display ILIKE $1)
+            WHERE (v.title ILIKE $${countParams.length + 1} OR v.description ILIKE $${countParams.length + 1} OR c.text_display ILIKE $${countParams.length + 1})
           `;
+
+          // Add channel filter to the 'all' search as well
+          if (channelId) {
+            query += ` AND v.channel_id = $${queryParams.length + 2}`;
+            countQuery += ` AND v.channel_id = $${countParams.length + 2}`;
+            queryParams.push(`%${search}%`, channelId);
+            countParams.push(`%${search}%`, channelId);
+          } else {
+            queryParams.push(`%${search}%`);
+            countParams.push(`%${search}%`);
+          }
         }
-        queryParams.push(`%${search}%`);
-        countParams.push(`%${search}%`);
+
+        if (searchIn !== 'all') {
+          queryParams.push(`%${search}%`);
+          countParams.push(`%${search}%`);
+        }
       }
     }
 
@@ -232,10 +263,13 @@ router.get('/:id/comments', async (req, res) => {
 
 /**
  * GET /api/videos/stats - Get overall statistics
+ * Supports optional channelId query parameter for channel-specific stats
  */
 router.get('/stats/overview', async (req, res) => {
   try {
-    const stats = await db.query(`
+    const { channelId } = req.query;
+
+    let statsQuery = `
       SELECT
         COUNT(*) as total_videos,
         SUM(view_count) as total_views,
@@ -245,13 +279,32 @@ router.get('/stats/overview', async (req, res) => {
         COUNT(CASE WHEN download_status = 'pending' THEN 1 END) as pending_videos,
         COUNT(CASE WHEN download_status = 'failed' THEN 1 END) as failed_videos
       FROM videos
-    `);
+    `;
 
-    const channelInfo = await db.query('SELECT * FROM channel LIMIT 1');
+    let stats;
+    if (channelId) {
+      statsQuery += ' WHERE channel_id = $1';
+      stats = await db.query(statsQuery, [channelId]);
+    } else {
+      stats = await db.query(statsQuery);
+    }
+
+    // Get channel info (either specific channel or all channels)
+    let channelInfo;
+    if (channelId) {
+      channelInfo = await db.query(
+        'SELECT id, title, description, custom_url, subscriber_count, video_count, view_count, thumbnail_url FROM channel WHERE id = $1',
+        [channelId]
+      );
+    } else {
+      channelInfo = await db.query(
+        'SELECT id, title, description, custom_url, subscriber_count, video_count, view_count, thumbnail_url FROM channel ORDER BY created_at DESC'
+      );
+    }
 
     res.json({
       stats: stats.rows[0],
-      channel: channelInfo.rows[0] || null
+      channels: channelInfo.rows
     });
   } catch (error) {
     console.error('Error fetching stats:', error);

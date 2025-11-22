@@ -13,9 +13,11 @@ app.use(express.json());
 // Routes
 const videosRoutes = require('./routes/videos');
 const syncRoutes = require('./routes/sync');
+const channelsRoutes = require('./routes/channels');
 
 app.use('/api/videos', videosRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/channels', channelsRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

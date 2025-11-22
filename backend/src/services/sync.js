@@ -4,33 +4,39 @@ const db = require('../db');
 
 class SyncService {
   constructor() {
-    this.youtubeAPI = new YouTubeAPIService(process.env.YOUTUBE_API_KEY);
     this.downloader = new VideoDownloader(process.env.VIDEO_STORAGE_PATH || '/data/videos');
-    this.channelId = process.env.YOUTUBE_CHANNEL_ID;
+  }
+
+  /**
+   * Get YouTube API instance for a specific channel
+   */
+  getYouTubeAPI(apiKey) {
+    return new YouTubeAPIService(apiKey);
   }
 
   /**
    * Full sync: Download all channel data
    */
-  async fullSync() {
-    const syncLogId = await this.createSyncLog('full_sync', 'running');
+  async fullSync(channelId, apiKey) {
+    const syncLogId = await this.createSyncLog(channelId, 'full_sync', 'running');
+    const youtubeAPI = this.getYouTubeAPI(apiKey);
 
     try {
-      console.log('Starting full channel sync...');
+      console.log(`Starting full channel sync for ${channelId}...`);
 
       // 1. Get and save channel details
-      const channelDetails = await this.youtubeAPI.getChannelDetails(this.channelId);
-      await this.saveChannelDetails(channelDetails);
+      const channelDetails = await youtubeAPI.getChannelDetails(channelId);
+      await this.saveChannelDetails(channelDetails, apiKey);
 
       // 2. Get all videos from the channel
-      const videos = await this.youtubeAPI.getAllChannelVideos(channelDetails.uploadsPlaylistId);
+      const videos = await youtubeAPI.getAllChannelVideos(channelDetails.uploadsPlaylistId);
       console.log(`Found ${videos.length} videos to process`);
 
       let processedCount = 0;
 
       // 3. Process each video
       for (const video of videos) {
-        await this.processVideo(video);
+        await this.processVideo(video, channelId, youtubeAPI);
         processedCount++;
 
         if (processedCount % 10 === 0) {
@@ -40,11 +46,11 @@ class SyncService {
 
       // 4. Update sync log
       await this.updateSyncLog(syncLogId, 'completed', processedCount, 0);
-      console.log('Full sync completed successfully');
+      console.log(`Full sync completed successfully for ${channelId}`);
 
       return { success: true, videosProcessed: processedCount };
     } catch (error) {
-      console.error('Full sync failed:', error);
+      console.error(`Full sync failed for ${channelId}:`, error);
       await this.updateSyncLog(syncLogId, 'failed', 0, 0, error.message);
       throw error;
     }
@@ -53,10 +59,10 @@ class SyncService {
   /**
    * Process a single video: save metadata, download video, fetch comments
    */
-  async processVideo(video) {
+  async processVideo(video, channelId, youtubeAPI) {
     try {
       // Save video metadata
-      await this.saveVideoMetadata(video);
+      await this.saveVideoMetadata(video, channelId);
 
       // Check if video already downloaded
       const existingVideo = await db.query(
@@ -72,7 +78,7 @@ class SyncService {
       }
 
       // Fetch and save comments
-      await this.fetchAndSaveComments(video.id);
+      await this.fetchAndSaveComments(video.id, youtubeAPI);
     } catch (error) {
       console.error(`Error processing video ${video.id}:`, error.message);
       // Mark video as failed
@@ -113,9 +119,9 @@ class SyncService {
   /**
    * Fetch and save comments for a video
    */
-  async fetchAndSaveComments(videoId) {
+  async fetchAndSaveComments(videoId, youtubeAPI) {
     try {
-      const comments = await this.youtubeAPI.getVideoComments(videoId);
+      const comments = await youtubeAPI.getVideoComments(videoId);
 
       // Delete existing comments for this video
       await db.query('DELETE FROM comments WHERE video_id = $1', [videoId]);
@@ -154,18 +160,19 @@ class SyncService {
   /**
    * Refresh comments for videos from the last 6 months
    */
-  async refreshRecentComments() {
-    const syncLogId = await this.createSyncLog('comments_refresh', 'running');
+  async refreshRecentComments(channelId, apiKey) {
+    const syncLogId = await this.createSyncLog(channelId, 'comments_refresh', 'running');
+    const youtubeAPI = this.getYouTubeAPI(apiKey);
 
     try {
-      console.log('Refreshing comments for videos from last 6 months...');
+      console.log(`Refreshing comments for videos from last 6 months (${channelId})...`);
 
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
       const result = await db.query(
-        'SELECT id FROM videos WHERE upload_date >= $1 ORDER BY upload_date DESC',
-        [sixMonthsAgo]
+        'SELECT id FROM videos WHERE channel_id = $1 AND upload_date >= $2 ORDER BY upload_date DESC',
+        [channelId, sixMonthsAgo]
       );
 
       const videoIds = result.rows.map(row => row.id);
@@ -174,17 +181,17 @@ class SyncService {
       let commentsProcessed = 0;
 
       for (const videoId of videoIds) {
-        const comments = await this.youtubeAPI.getVideoComments(videoId);
-        await this.fetchAndSaveComments(videoId);
+        const comments = await youtubeAPI.getVideoComments(videoId);
+        await this.fetchAndSaveComments(videoId, youtubeAPI);
         commentsProcessed += comments.length;
       }
 
       await this.updateSyncLog(syncLogId, 'completed', videoIds.length, commentsProcessed);
-      console.log(`Comments refresh completed. Processed ${commentsProcessed} comments`);
+      console.log(`Comments refresh completed for ${channelId}. Processed ${commentsProcessed} comments`);
 
       return { success: true, videosProcessed: videoIds.length, commentsProcessed };
     } catch (error) {
-      console.error('Comments refresh failed:', error);
+      console.error(`Comments refresh failed for ${channelId}:`, error);
       await this.updateSyncLog(syncLogId, 'failed', 0, 0, error.message);
       throw error;
     }
@@ -193,14 +200,15 @@ class SyncService {
   /**
    * Incremental sync: Only process new videos
    */
-  async incrementalSync() {
-    const syncLogId = await this.createSyncLog('incremental_sync', 'running');
+  async incrementalSync(channelId, apiKey) {
+    const syncLogId = await this.createSyncLog(channelId, 'incremental_sync', 'running');
+    const youtubeAPI = this.getYouTubeAPI(apiKey);
 
     try {
-      console.log('Starting incremental sync...');
+      console.log(`Starting incremental sync for ${channelId}...`);
 
-      const channelDetails = await this.youtubeAPI.getChannelDetails(this.channelId);
-      const videos = await this.youtubeAPI.getAllChannelVideos(channelDetails.uploadsPlaylistId);
+      const channelDetails = await youtubeAPI.getChannelDetails(channelId);
+      const videos = await youtubeAPI.getAllChannelVideos(channelDetails.uploadsPlaylistId);
 
       let newVideosCount = 0;
 
@@ -209,20 +217,20 @@ class SyncService {
 
         if (existing.rows.length === 0) {
           console.log(`New video found: ${video.title}`);
-          await this.processVideo(video);
+          await this.processVideo(video, channelId, youtubeAPI);
           newVideosCount++;
         }
       }
 
       // Also refresh comments for recent videos
-      await this.refreshRecentComments();
+      await this.refreshRecentComments(channelId, apiKey);
 
       await this.updateSyncLog(syncLogId, 'completed', newVideosCount, 0);
-      console.log(`Incremental sync completed. Processed ${newVideosCount} new videos`);
+      console.log(`Incremental sync completed for ${channelId}. Processed ${newVideosCount} new videos`);
 
       return { success: true, newVideos: newVideosCount };
     } catch (error) {
-      console.error('Incremental sync failed:', error);
+      console.error(`Incremental sync failed for ${channelId}:`, error);
       await this.updateSyncLog(syncLogId, 'failed', 0, 0, error.message);
       throw error;
     }
@@ -231,12 +239,12 @@ class SyncService {
   /**
    * Save channel details to database
    */
-  async saveChannelDetails(channel) {
+  async saveChannelDetails(channel, apiKey) {
     await db.query(
       `INSERT INTO channel (
         id, title, description, custom_url, subscriber_count,
-        video_count, view_count, thumbnail_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        video_count, view_count, thumbnail_url, api_key
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title,
         description = EXCLUDED.description,
@@ -245,11 +253,12 @@ class SyncService {
         video_count = EXCLUDED.video_count,
         view_count = EXCLUDED.view_count,
         thumbnail_url = EXCLUDED.thumbnail_url,
+        api_key = EXCLUDED.api_key,
         updated_at = CURRENT_TIMESTAMP`,
       [
         channel.id, channel.title, channel.description, channel.customUrl,
         channel.subscriberCount, channel.videoCount, channel.viewCount,
-        channel.thumbnailUrl
+        channel.thumbnailUrl, apiKey
       ]
     );
   }
@@ -257,7 +266,7 @@ class SyncService {
   /**
    * Save video metadata to database
    */
-  async saveVideoMetadata(video) {
+  async saveVideoMetadata(video, channelId) {
     await db.query(
       `INSERT INTO videos (
         id, channel_id, title, description, upload_date, duration,
@@ -272,7 +281,7 @@ class SyncService {
         comment_count = EXCLUDED.comment_count,
         updated_at = CURRENT_TIMESTAMP`,
       [
-        video.id, this.channelId, video.title, video.description,
+        video.id, channelId, video.title, video.description,
         video.uploadDate, video.duration, video.viewCount, video.likeCount,
         video.commentCount, video.thumbnailUrl, video.tags,
         video.categoryId, video.privacyStatus, 'pending'
@@ -283,10 +292,10 @@ class SyncService {
   /**
    * Create a sync log entry
    */
-  async createSyncLog(syncType, status) {
+  async createSyncLog(channelId, syncType, status) {
     const result = await db.query(
-      'INSERT INTO sync_log (sync_type, status) VALUES ($1, $2) RETURNING id',
-      [syncType, status]
+      'INSERT INTO sync_log (channel_id, sync_type, status) VALUES ($1, $2, $3) RETURNING id',
+      [channelId, syncType, status]
     );
     return result.rows[0].id;
   }

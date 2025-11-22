@@ -66,6 +66,9 @@ function Header() {
       </div>
 
       <div className="header-right">
+        <Link to="/channels" className="nav-button">
+          Channels
+        </Link>
         <Link to="/stats" className="nav-button">
           Stats
         </Link>

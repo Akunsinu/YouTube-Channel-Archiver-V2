@@ -1,14 +1,17 @@
 # YouTube Channel Archiver
 
-A self-hosted application to download and archive all videos from your YouTube channel, complete with metadata, comments, and a YouTube-like viewing experience.
+A self-hosted application to download and archive videos from **multiple YouTube channels**, complete with metadata, comments, and a YouTube-like viewing experience.
 
 ## Features
 
-- **Complete Channel Archival**: Downloads all videos from your YouTube channel
+- **Multi-Channel Support**: Archive videos from unlimited YouTube channels
+- **Channel Management UI**: Add, remove, and configure channels through the web interface
+- **Complete Channel Archival**: Downloads all videos from your YouTube channels
 - **Metadata Preservation**: Saves titles, descriptions, view counts, likes, tags, and more
 - **Comment Archival**: Downloads all comments and replies with full threading support
 - **YouTube-like Viewer**: Modern React-based web interface for browsing and watching videos
-- **Auto-Sync**: Daily automated syncing for new videos and comment updates
+- **Per-Channel Scheduling**: Configure independent sync schedules for each channel
+- **Auto-Sync**: Automated syncing for new videos and comment updates
 - **Smart Comment Refresh**: Automatically updates comments for videos from the last 6 months
 - **Docker Deployment**: Easy deployment with Docker Compose on Unraid or any Docker host
 - **Hybrid Approach**: Uses yt-dlp for reliable video downloads and YouTube API for comprehensive metadata
@@ -25,8 +28,8 @@ A self-hosted application to download and archive all videos from your YouTube c
 ## Prerequisites
 
 - Docker and Docker Compose
-- YouTube Data API v3 key ([Get one here](https://console.cloud.google.com/apis/credentials))
-- Your YouTube Channel ID ([Find it here](https://www.youtube.com/account_advanced))
+- YouTube Data API v3 key(s) ([Get one here](https://console.cloud.google.com/apis/credentials))
+- YouTube Channel ID(s) you want to archive ([Find it here](https://www.youtube.com/account_advanced))
 - Sufficient storage space for your videos
 
 ## Quick Start
@@ -50,15 +53,14 @@ Required configuration:
 # Database password (choose a strong password)
 DB_PASSWORD=your_secure_password
 
-# Get from: https://console.cloud.google.com/apis/credentials
+# Optional: Import existing channel during migration (backward compatibility)
+# If specified, this channel will be automatically added to the database
 YOUTUBE_API_KEY=your_youtube_api_key
-
-# Find at: https://www.youtube.com/account_advanced
 YOUTUBE_CHANNEL_ID=your_channel_id
-
-# Optional: Customize sync schedule (default: 2 AM daily)
 SYNC_CRON=0 2 * * *
 ```
+
+**Note**: The `YOUTUBE_API_KEY` and `YOUTUBE_CHANNEL_ID` environment variables are now optional. You can add and manage channels through the web interface instead! These variables are only used for backward compatibility - if specified, the channel will be automatically imported during database migration.
 
 ### 3. Deploy with Docker Compose
 
@@ -79,11 +81,21 @@ Run the database migration to create tables:
 docker exec -it youtube-archiver-backend npm run migrate
 ```
 
-### 5. Start Initial Sync
+### 5. Add Channels
 
 Open your browser and navigate to:
 - **Web Interface**: http://your-server-ip
-- Click "Full Sync" to start downloading your channel
+
+#### Option A: Add Channels via Web Interface (Recommended)
+1. Click "Channels" in the navigation
+2. Click "Add Channel"
+3. Enter your YouTube Channel ID and API Key
+4. Configure sync schedule (optional, defaults to 2 AM daily)
+5. Click "Add Channel"
+6. Trigger "Full Sync" to start downloading
+
+#### Option B: Automatic Import (If using environment variables)
+If you configured `YOUTUBE_CHANNEL_ID` and `YOUTUBE_API_KEY` in `.env`, your channel was automatically imported during migration. Just click "Full Sync" to start!
 
 ## Usage
 
@@ -91,20 +103,30 @@ Open your browser and navigate to:
 
 Access the web interface at `http://your-server-ip`
 
+#### Channel Management
+- **View All Channels**: See all configured channels with stats and settings
+- **Add New Channels**: Add unlimited YouTube channels to archive
+- **Remove Channels**: Delete channels and all associated data
+- **Enable/Disable Sync**: Toggle automatic syncing per channel
+- **Trigger Manual Syncs**: Start incremental or full syncs for specific channels
+- **Per-Channel Scheduling**: Customize sync schedules using cron format
+
 #### Home Page
-- Browse all your archived videos in a grid layout
-- Search videos by title or description
-- Filter by upload date
+- Browse all archived videos from all channels in a grid layout
+- Search videos by title, description, or comments
+- Filter videos by channel
+- Sort by upload date, views, or likes
 - Click on any downloaded video to watch
 
 #### Video Player
 - Watch videos with a custom HTML5 player
-- View complete metadata (views, likes, upload date)
+- View complete metadata (views, likes, upload date, channel)
 - Read all comments with nested replies
 - See video tags and description
 
 #### Stats Page
-- View channel statistics
+- View overall statistics across all channels
+- View per-channel statistics
 - Monitor download progress
 - Check sync history and status
 
@@ -112,21 +134,46 @@ Access the web interface at `http://your-server-ip`
 
 You can trigger syncs manually from the web interface:
 
+**From Header (syncs all enabled channels)**:
 - **Sync Now**: Incremental sync (downloads only new videos + refreshes recent comments)
 - **Full Sync**: Complete sync (processes all videos)
+
+**From Channel Management (syncs specific channel)**:
+- **Incremental Sync**: Download new videos for this channel only
+- **Full Sync**: Process all videos for this channel
 
 ### API Endpoints
 
 The backend exposes these REST API endpoints:
 
+#### Channel Management
 ```
-GET  /api/videos                 - List all videos (paginated)
+GET    /api/channels           - List all channels
+GET    /api/channels/:id       - Get specific channel
+POST   /api/channels           - Add new channel
+PUT    /api/channels/:id       - Update channel settings
+DELETE /api/channels/:id       - Remove channel
+POST   /api/channels/:id/sync  - Trigger sync for specific channel
+```
+
+#### Videos
+```
+GET  /api/videos                 - List all videos (paginated, supports ?channelId filter)
 GET  /api/videos/:id             - Get video details
 GET  /api/videos/:id/stream      - Stream video file
 GET  /api/videos/:id/comments    - Get video comments
-GET  /api/videos/stats/overview  - Get channel statistics
-POST /api/sync/trigger           - Trigger manual sync
+GET  /api/videos/stats/overview  - Get statistics (supports ?channelId filter)
+```
+
+#### Sync
+```
+POST /api/sync/trigger           - Trigger manual sync (all channels or specific channel)
 GET  /api/sync/status            - Get sync status
+GET  /api/sync/progress          - Get current sync progress
+```
+
+#### Health
+```
 GET  /health                     - Health check
 ```
 
@@ -182,7 +229,7 @@ SYNC_CRON=0 3 * * 0
 
 ### YouTube API Quota
 
-The YouTube Data API has a quota of 10,000 units per day. This application is designed to work within these limits:
+The YouTube Data API has a quota of 10,000 units per day **per API key**. This application is designed to work within these limits:
 
 - Fetching channel details: ~3 units
 - Fetching video list: ~1 unit per 50 videos
@@ -193,6 +240,14 @@ For a channel with 500 videos and 10,000 comments, a full sync uses approximatel
 - 500 units for video details
 - 100 units for comments
 - Total: ~600 units (well within daily quota)
+
+#### Multi-Channel Considerations
+
+When archiving multiple channels:
+- **Option 1**: Use the same API key for all channels (shares quota)
+- **Option 2**: Use different API keys per channel (separate quotas)
+- Schedule syncs at different times to spread out API usage
+- Use incremental syncs to reduce daily quota usage
 
 ## Troubleshooting
 
